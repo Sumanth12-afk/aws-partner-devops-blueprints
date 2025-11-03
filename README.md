@@ -21,6 +21,9 @@ AWS, Terraform, GitHub Actions, Docker, Kubernetes, Trivy, Checkov, CloudWatch
 ## Related Terraform Modules
 For additional production-ready Terraform modules (networking, compute, security, monitoring, etc.), see: [terraform-aws-startup-infrastructure](https://github.com/Sumanth12-afk/terraform-aws-startup-infrastructure)
 
+## Repository Secrets
+See `docs/github-secrets.md` for the list of required GitHub Actions secrets and recommended IAM permissions.
+
 ## Why This Project Matters
 This repository reflects the implementation quality expected of AWS Partners: secure-by-default baselines, automated pipelines, infrastructure immutability, and continuous compliance with pragmatic cost controls.
 
