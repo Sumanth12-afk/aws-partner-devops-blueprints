@@ -1,0 +1,30 @@
+name: Trivy Image Scan
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  trivy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image (placeholder Dockerfile)
+        run: |
+          echo "FROM nginx:stable-alpine" > Dockerfile
+          docker build -t demo:scan .
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: demo:scan
+          format: 'table'
+          exit-code: '0'
+          vuln-type: 'os,library'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+
