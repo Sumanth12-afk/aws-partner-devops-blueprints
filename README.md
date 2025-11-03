@@ -21,6 +21,16 @@ AWS, Terraform, GitHub Actions, Docker, Kubernetes, Trivy, Checkov, CloudWatch
 ## Related Terraform Modules
 For additional production-ready Terraform modules (networking, compute, security, monitoring, etc.), see: [terraform-aws-startup-infrastructure](https://github.com/Sumanth12-afk/terraform-aws-startup-infrastructure)
 
+## Container Image
+This repo includes a multi-stage Dockerfile that builds a tiny Go HTTP server and runs it on a distroless, non-root image (port 8080) for demo purposes.
+
+Build and run locally:
+
+```bash
+docker build -t devops-showcase:latest .
+docker run -p 8080:8080 devops-showcase:latest
+```
+
 ## Repository Secrets
 See `docs/github-secrets.md` for the list of required GitHub Actions secrets and recommended IAM permissions.
 

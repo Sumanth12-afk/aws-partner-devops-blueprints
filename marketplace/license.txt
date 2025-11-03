@@ -1,0 +1,5 @@
+This Professional Services engagement is delivered by Sumanth Nallandhigal (AWS Partner & DevOps Engineer).
+
+Unless otherwise agreed in a separate Statement of Work (SOW), deliverables provided as code are licensed under the MIT License (see root LICENSE). Service terms, pricing, and support are governed by the AWS Marketplace listing and the associated SOW.
+
+Contact: sumanthnallandhigal@gmail.com

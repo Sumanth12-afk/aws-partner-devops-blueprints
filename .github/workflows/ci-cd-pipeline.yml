@@ -38,10 +38,17 @@ jobs:
         uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
-          format: 'table'
+          format: 'json'
+          output: trivy_report.json
           exit-code: '0'
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Trivy report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: trivy_report.json
 
       - name: Tag and push to ECR
         run: |
@@ -50,8 +57,29 @@ jobs:
           docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_URI:$IMAGE_TAG
           docker push $ECR_URI:$IMAGE_TAG
 
+  checkov:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Checkov on Terraform
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform
+          soft_fail: ${{ github.ref != 'refs/heads/main' }}
+          framework: terraform
+          output_format: json
+          output_file_path: checkov_report.json
+
+      - name: Upload Checkov report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: checkov_report.json
+
   terraform-apply:
-    needs: build-scan-push
+    needs: [build-scan-push, checkov]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -76,6 +104,10 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform init -input=false
 
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
       - name: Terraform Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform plan -input=false -out=tfplan
@@ -84,6 +116,9 @@ jobs:
         if: github.ref == 'refs/heads/main'
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Job Summary
+        run: echo "✅ Terraform plan/apply completed" >> $GITHUB_STEP_SUMMARY
 
   deploy-ecs:
     needs: terraform-apply
@@ -96,7 +131,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy ECS Service (placeholder)
+      - name: Update ECS task definition image and deploy
         env:
           ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
           ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
@@ -106,7 +141,63 @@ jobs:
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           IMAGE_URI=$ACCOUNT_ID.dkr.ecr.${AWS_REGION}.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
-          echo "Updating service image to $IMAGE_URI"
-          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --force-new-deployment >/dev/null
+          echo "Setting task definition image to $IMAGE_URI"
+          TD=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].taskDefinition' --output text)
+          aws ecs describe-task-definition --task-definition "$TD" --query 'taskDefinition' > td.json
+          jq --arg IMG "$IMAGE_URI" '.containerDefinitions[0].image=$IMG | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' td.json > new-td.json
+          NEW_TD_ARN=$(aws ecs register-task-definition --cli-input-json file://new-td.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --task-definition "$NEW_TD_ARN"
+
+      - name: Notify via SNS
+        env:
+          TOPIC_ARN: ${{ secrets.CICD_SNS_TOPIC_ARN }}
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          aws sns publish --topic-arn "${TOPIC_ARN}" \
+            --message "✅ ECS deployment successful for image ${IMAGE_TAG}" \
+            --subject "AWS DevOps Pipeline Notification" || true
+
+      - name: Job Summary
+        run: echo "✅ ECS deployment step completed" >> $GITHUB_STEP_SUMMARY
+
+  finops-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Estimated AWS Billing Alerts
+        run: |
+          aws cloudwatch describe-alarms --query "MetricAlarms[?MetricName=='EstimatedCharges'].AlarmName"
+
+      - name: Job Summary
+        run: echo "ℹ️ FinOps check executed" >> $GITHUB_STEP_SUMMARY
+
+  destroy:
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Destroy
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform destroy -auto-approve
 
 
